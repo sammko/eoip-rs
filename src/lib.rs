@@ -4,7 +4,8 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::unix::io::AsRawFd;
 use std::process::exit;
 
-use anyhow::{Result,anyhow};
+use anyhow::{Context, Result, anyhow};
+use nix::ioctl_write_ptr;
 use nix::sys::select::{select, FdSet};
 use nix::sys::time::{TimeSpec, TimeValLike};
 use nix::sys::timerfd::{ClockId, Expiration, TimerFd, TimerFlags, TimerSetTimeFlags};
@@ -12,6 +13,19 @@ use socket2::{Domain, SockAddr, Socket, Type};
 use tun_tap::{Iface, Mode};
 
 const GRE_PROTOCOL: i32 = 47;
+
+const TUN_IOC_MAGIC: u8 = b'T';
+const TUN_IOC_TUNSETCARRIER: u8 = 226;
+ioctl_write_ptr!(ioctl_tun_set_carrier, TUN_IOC_MAGIC, TUN_IOC_TUNSETCARRIER, i32);
+
+fn tun_set_carrier(tun: &Iface, carrier: bool) -> Result<()> {
+    let fd = tun.as_raw_fd();
+    let carrier = carrier.into();
+    unsafe {
+        ioctl_tun_set_carrier(fd, &carrier)?;
+    }
+    Ok(())
+}
 
 pub struct TunnelConfig {
     local: Option<Ipv4Addr>,
@@ -133,7 +147,7 @@ impl Eoip {
                 match self.socket.read(buf.as_mut_slice()) {
                     Ok(n) => {
                         match self.process_raw(&buf[..n]) {
-                            Err(ref e) => eprintln!("process_raw: {}", e),
+                            Err(ref e) => eprintln!("process_raw: {:#}", e),
                             Ok(_) => {}
                         };
                     }
@@ -151,6 +165,7 @@ impl Eoip {
                 if read_fds.contains(tfd.as_raw_fd()) {
                     tfd.wait()?;
                     self.dead = true;
+                    tun_set_carrier(&self.tap, false)?;
                 }
             }
         }
@@ -165,7 +180,10 @@ impl Eoip {
 
     fn keepalive_rcvd(&mut self) -> Result<()> {
         if let Some(ref t) = self.timer_rx {
-            self.dead = false;
+            if self.dead == true {
+                tun_set_carrier(&self.tap, true)?;
+                self.dead = false;
+            }
             t.set(
                 Expiration::OneShot(TimeSpec::seconds(self.config.recv_timeout.unwrap() as i64)),
                 TimerSetTimeFlags::empty()
@@ -197,7 +215,7 @@ impl Eoip {
         if data_len_header != data_len {
             return Err(anyhow!("Data length mismatch!"));
         }
-        self.keepalive_rcvd()?;
+        self.keepalive_rcvd().context("keepalive_rcvd")?;
         if data_len == 0 {
             return Ok(());
         }
