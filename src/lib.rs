@@ -2,6 +2,7 @@ use std::convert::TryInto;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::unix::io::AsRawFd;
+use std::process::exit;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -11,21 +12,21 @@ use nix::sys::timerfd::{ClockId, Expiration, TimerFd, TimerFlags, TimerSetTimeFl
 use socket2::{Domain, SockAddr, Socket, Type};
 use tun_tap::{Iface, Mode};
 
-pub struct TunnelConfig<'a> {
+pub struct TunnelConfig {
     local: Option<Ipv4Addr>,
     remote: Ipv4Addr,
     tunnel_id: u16,
-    tap_name: &'a str,
+    tap_name: Option<String>,
     keepalive_interval: Option<u64>,
     recv_timeout: Option<u64>,
 }
 
-impl<'a> TunnelConfig<'a> {
+impl TunnelConfig {
     pub fn new(
         local: Option<Ipv4Addr>,
         remote: Ipv4Addr,
         tunnel_id: u16,
-        tap_name: &'a str,
+        tap_name: Option<String>,
         keepalive_interval: Option<u64>,
         recv_timeout: Option<u64>,
     ) -> Self {
@@ -40,13 +41,13 @@ impl<'a> TunnelConfig<'a> {
     }
 }
 
-pub struct Eoip<'a> {
-    config: TunnelConfig<'a>,
+pub struct Eoip {
+    config: TunnelConfig,
     last_received: Option<Instant>,
 }
 
-impl<'a> Eoip<'a> {
-    pub fn new(config: TunnelConfig<'a>) -> Self {
+impl Eoip {
+    pub fn new(config: TunnelConfig) -> Self {
         Eoip {
             config,
             last_received: None,
@@ -55,14 +56,21 @@ impl<'a> Eoip<'a> {
 
     pub fn run(&mut self) -> ! {
         match self._run() {
-            Ok(_) => {}
-            Err(e) => eprintln!("{}", e),
+            Ok(_) => {
+                exit(0)
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                exit(1)
+            },
         }
-        panic!("Exited");
     }
 
     fn _run(&mut self) -> Result<()> {
-        let mut tap = Iface::without_packet_info(self.config.tap_name, Mode::Tap)?;
+        let tap_name = if let Some(ref name) = self.config.tap_name {
+            &name
+        } else {""};
+        let mut tap = Iface::without_packet_info(tap_name, Mode::Tap)?;
         eprintln!("Running on {}", tap.name());
 
         let mut socket = Socket::new(Domain::IPV4, Type::RAW, Some(47.into()))?;
