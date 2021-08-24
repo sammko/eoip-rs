@@ -1,0 +1,13 @@
+[package]
+name = "eoip-rs"
+version = "0.1.0"
+authors = ["Samuel Čavoj <samuel@cavoj.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.43"
+nix = "0.22.1"
+socket2 = { version = "0.4.1", features = ["all"] }
+tun-tap = { version = "0.1.2", default-features = false }
