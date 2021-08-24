@@ -17,8 +17,7 @@ struct TunnelConfig<'a> {
     tunnel_id: u16,
     tap_name: &'a str,
     keepalive_interval: Option<u64>,
-    wait_for_peer: bool,
-    recv_timeout: u64,
+    recv_timeout: Option<u64>,
 }
 
 impl<'a> TunnelConfig<'a> {
@@ -28,8 +27,7 @@ impl<'a> TunnelConfig<'a> {
         tunnel_id: u16,
         tap_name: &'a str,
         keepalive_interval: Option<u64>,
-        wait_for_peer: bool,
-        recv_timeout: u64,
+        recv_timeout: Option<u64>,
     ) -> Self {
         TunnelConfig {
             local,
@@ -37,7 +35,6 @@ impl<'a> TunnelConfig<'a> {
             tunnel_id,
             tap_name,
             keepalive_interval,
-            wait_for_peer,
             recv_timeout,
         }
     }
@@ -172,10 +169,10 @@ impl<'a> Eoip<'a> {
     }
 
     fn received_tap(&self, length: usize, buf: &mut [u8], socket: &mut Socket) {
-        if self.config.wait_for_peer {
+        if let Some(timeout) = self.config.recv_timeout {
             match self.last_received {
                 None => return,
-                Some(t) if t.elapsed().as_secs() >= self.config.recv_timeout => return,
+                Some(t) if t.elapsed().as_secs() >= timeout => return,
                 _ => {}
             }
         }
@@ -198,8 +195,7 @@ fn main() -> Result<()> {
         999,
         "",
         Some(3),
-        true,
-        5,
+        Some(5),
     ))
     .run();
 }
