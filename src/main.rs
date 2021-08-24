@@ -71,5 +71,5 @@ fn parse_args() -> Result<TunnelConfig> {
 }
 
 fn main() -> Result<()> {
-    Eoip::new(parse_args()?).run();
+    Eoip::new(parse_args()?)?.run();
 }
