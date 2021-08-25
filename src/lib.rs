@@ -124,6 +124,10 @@ impl Eoip {
             self.send_keepalive()?;
         }
 
+        if self.dead {
+            tun_set_carrier(&self.tap, false)?;
+        }
+
         let mut read_fds = FdSet::new();
         loop {
             read_fds.insert(self.tap.as_raw_fd());
