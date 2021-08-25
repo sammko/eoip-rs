@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::unix::io::AsRawFd;
 use std::process::exit;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use nix::ioctl_write_ptr;
 use nix::sys::select::{select, FdSet};
 use nix::sys::time::{TimeSpec, TimeValLike};
@@ -16,7 +16,12 @@ const GRE_PROTOCOL: i32 = 47;
 
 const TUN_IOC_MAGIC: u8 = b'T';
 const TUN_IOC_TUNSETCARRIER: u8 = 226;
-ioctl_write_ptr!(ioctl_tun_set_carrier, TUN_IOC_MAGIC, TUN_IOC_TUNSETCARRIER, i32);
+ioctl_write_ptr!(
+    ioctl_tun_set_carrier,
+    TUN_IOC_MAGIC,
+    TUN_IOC_TUNSETCARRIER,
+    i32
+);
 
 fn tun_set_carrier(tun: &Iface, carrier: bool) -> Result<()> {
     let fd = tun.as_raw_fd();
@@ -63,14 +68,16 @@ pub struct Eoip {
     socket: Socket,
     timer_tx: Option<TimerFd>,
     timer_rx: Option<TimerFd>,
-    dead: bool
+    dead: bool,
 }
 
 impl Eoip {
     pub fn new(config: TunnelConfig) -> Result<Self> {
         let tap_name = if let Some(ref name) = config.tap_name {
             &name
-        } else {""};
+        } else {
+            ""
+        };
         let tap = Iface::without_packet_info(tap_name, Mode::Tap)?;
         let socket = Socket::new(Domain::IPV4, Type::RAW, Some(GRE_PROTOCOL.into()))?;
 
@@ -95,19 +102,17 @@ impl Eoip {
             socket,
             timer_tx,
             timer_rx,
-            dead
+            dead,
         })
     }
 
     pub fn run(&mut self) -> ! {
         match self._run() {
-            Ok(_) => {
-                exit(0)
-            }
+            Ok(_) => exit(0),
             Err(e) => {
                 eprintln!("{}", e);
                 exit(1)
-            },
+            }
         }
     }
 
@@ -116,12 +121,15 @@ impl Eoip {
 
         // Consider moving this to new()
         if let Some(local) = self.config.local {
-            self.socket.bind(&SockAddr::from(SocketAddrV4::new(local, 0)))?;
+            self.socket
+                .bind(&SockAddr::from(SocketAddrV4::new(local, 0)))?;
         }
 
         if let Some(tfd) = &self.timer_tx {
             tfd.set(
-                Expiration::Interval(TimeSpec::seconds(self.config.keepalive_interval.unwrap() as i64)),
+                Expiration::Interval(TimeSpec::seconds(
+                    self.config.keepalive_interval.unwrap() as i64
+                )),
                 TimerSetTimeFlags::empty(),
             )?;
             self.send_keepalive()?;
@@ -135,8 +143,12 @@ impl Eoip {
         loop {
             read_fds.insert(self.tap.as_raw_fd());
             read_fds.insert(self.socket.as_raw_fd());
-            self.timer_tx.as_ref().map(|fd| read_fds.insert(fd.as_raw_fd()));
-            self.timer_rx.as_ref().map(|fd| read_fds.insert(fd.as_raw_fd()));
+            self.timer_tx
+                .as_ref()
+                .map(|fd| read_fds.insert(fd.as_raw_fd()));
+            self.timer_rx
+                .as_ref()
+                .map(|fd| read_fds.insert(fd.as_raw_fd()));
             let _ = select(None, &mut read_fds, None, None, None)?;
 
             if read_fds.contains(self.tap.as_raw_fd()) {
@@ -193,7 +205,7 @@ impl Eoip {
             }
             t.set(
                 Expiration::OneShot(TimeSpec::seconds(self.config.recv_timeout.unwrap() as i64)),
-                TimerSetTimeFlags::empty()
+                TimerSetTimeFlags::empty(),
             )?;
         }
         Ok(())
@@ -229,7 +241,7 @@ impl Eoip {
         match self.tap.send(data) {
             Ok(_) => Ok(()),
             Err(ref e) if matches!(e.raw_os_error(), Some(5)) => Ok(()),
-            Err(e) => Err(anyhow!("Failed to send to TAP interface: {}", e))
+            Err(e) => Err(anyhow!("Failed to send to TAP interface: {}", e)),
         }
     }
 
