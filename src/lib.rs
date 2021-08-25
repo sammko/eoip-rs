@@ -1,5 +1,5 @@
 use std::convert::TryInto;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::unix::io::AsRawFd;
 use std::process::exit;
@@ -58,6 +58,7 @@ impl TunnelConfig {
 
 pub struct Eoip {
     config: TunnelConfig,
+    remote_sa: SockAddr,
     tap: Iface,
     socket: Socket,
     timer_tx: Option<TimerFd>,
@@ -85,8 +86,11 @@ impl Eoip {
             dead = true;
         }
 
+        let remote_sa = SockAddr::from(SocketAddrV4::new(config.remote, 0));
+
         Ok(Eoip {
             config,
+            remote_sa,
             tap,
             socket,
             timer_tx,
@@ -114,7 +118,6 @@ impl Eoip {
         if let Some(local) = self.config.local {
             self.socket.bind(&SockAddr::from(SocketAddrV4::new(local, 0)))?;
         }
-        self.socket.connect(&SockAddr::from(SocketAddrV4::new(self.config.remote, 0)))?;
 
         if let Some(tfd) = &self.timer_tx {
             tfd.set(
@@ -178,7 +181,7 @@ impl Eoip {
     fn send_keepalive(&mut self) -> Result<()> {
         let mut buf = [32, 1, 100, 0, 0, 0, 0, 0];
         buf[6..8].copy_from_slice(&(self.config.tunnel_id as u16).to_le_bytes());
-        self.socket.write(&buf)?;
+        self.socket.send_to(&buf, &self.remote_sa)?;
         Ok(())
     }
 
@@ -199,7 +202,6 @@ impl Eoip {
     fn process_raw(&mut self, packet: &[u8]) -> Result<()> {
         if packet.len() < 28 {
             return Err(anyhow!("Too short packet received!"));
-            
         }
         let _ip_hdr = &packet[0..19];
         let gre_hdr = &packet[20..24];
@@ -238,7 +240,7 @@ impl Eoip {
         buf[..4].copy_from_slice(&[32, 1, 100, 0]);
         buf[4..6].copy_from_slice(&(length as u16).to_be_bytes());
         buf[6..8].copy_from_slice(&(self.config.tunnel_id as u16).to_le_bytes());
-        match self.socket.write(&buf) {
+        match self.socket.send_to(&buf, &self.remote_sa) {
             Ok(_) => {}
             Err(e) => {
                 eprintln!("Failed to write to raw socket: {}", e);
