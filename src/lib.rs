@@ -73,11 +73,7 @@ pub struct Eoip {
 
 impl Eoip {
     pub fn new(config: TunnelConfig) -> Result<Self> {
-        let tap_name = if let Some(ref name) = config.tap_name {
-            &name
-        } else {
-            ""
-        };
+        let tap_name = config.tap_name.as_deref().unwrap_or("");
         let tap = Iface::without_packet_info(tap_name, Mode::Tap)?;
         let socket = Socket::new(Domain::IPV4, Type::RAW, Some(GRE_PROTOCOL.into()))?;
 
@@ -143,20 +139,24 @@ impl Eoip {
         loop {
             read_fds.insert(self.tap.as_raw_fd());
             read_fds.insert(self.socket.as_raw_fd());
-            self.timer_tx
-                .as_ref()
-                .map(|fd| read_fds.insert(fd.as_raw_fd()));
-            self.timer_rx
-                .as_ref()
-                .map(|fd| read_fds.insert(fd.as_raw_fd()));
-            let _ = select(None, &mut read_fds, None, None, None)?;
+
+            if let Some(ref tfd) = self.timer_tx {
+                read_fds.insert(tfd.as_raw_fd());
+            }
+
+            if let Some(ref tfd) = self.timer_rx {
+                read_fds.insert(tfd.as_raw_fd());
+            }
+
+            select(None, &mut read_fds, None, None, None)?;
 
             if read_fds.contains(self.tap.as_raw_fd()) {
                 let mut buf = vec![0u8; 65536];
                 match self.tap.recv(&mut buf[8..]) {
-                    Ok(n) => {
-                        self.received_tap(n, &mut buf[..n + 8]);
-                    }
+                    Ok(n) => match self.process_from_tap(n, &mut buf[..n + 8]) {
+                        Err(ref e) => eprintln!("process_from_tap: {:#}", e),
+                        Ok(_) => {}
+                    },
                     Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
                     Err(e) => panic!("tap.recv: {}", e),
                 };
@@ -165,8 +165,8 @@ impl Eoip {
                 let mut buf = vec![0u8; 65536];
                 match self.socket.read(buf.as_mut_slice()) {
                     Ok(n) => {
-                        match self.process_raw(&buf[..n]) {
-                            Err(ref e) => eprintln!("process_raw: {:#}", e),
+                        match self.process_from_sock(&buf[..n]) {
+                            Err(ref e) => eprintln!("process_from_sock: {:#}", e),
                             Ok(_) => {}
                         };
                     }
@@ -211,7 +211,18 @@ impl Eoip {
         Ok(())
     }
 
-    fn process_raw(&mut self, packet: &[u8]) -> Result<()> {
+    fn process_from_tap(&mut self, length: usize, buf: &mut [u8]) -> Result<()> {
+        if self.dead {
+            return Ok(());
+        }
+        buf[..4].copy_from_slice(&[32, 1, 100, 0]);
+        buf[4..6].copy_from_slice(&(length as u16).to_be_bytes());
+        buf[6..8].copy_from_slice(&(self.config.tunnel_id as u16).to_le_bytes());
+        self.socket.send_to(&buf, &self.remote_sa)?;
+        Ok(())
+    }
+
+    fn process_from_sock(&mut self, packet: &[u8]) -> Result<()> {
         if packet.len() < 28 {
             return Err(anyhow!("Too short packet received!"));
         }
@@ -242,21 +253,6 @@ impl Eoip {
             Ok(_) => Ok(()),
             Err(ref e) if matches!(e.raw_os_error(), Some(5)) => Ok(()),
             Err(e) => Err(anyhow!("Failed to send to TAP interface: {}", e)),
-        }
-    }
-
-    fn received_tap(&mut self, length: usize, buf: &mut [u8]) {
-        if self.dead {
-            return;
-        }
-        buf[..4].copy_from_slice(&[32, 1, 100, 0]);
-        buf[4..6].copy_from_slice(&(length as u16).to_be_bytes());
-        buf[6..8].copy_from_slice(&(self.config.tunnel_id as u16).to_le_bytes());
-        match self.socket.send_to(&buf, &self.remote_sa) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Failed to write to raw socket: {}", e);
-            }
         }
     }
 }
