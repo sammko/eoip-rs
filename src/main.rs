@@ -1,6 +1,6 @@
 mod lib;
 
-use anyhow::{Result, Error};
+use anyhow::{anyhow, Result};
 use lib::{Eoip, TunnelConfig};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -32,24 +32,12 @@ fn parse_args() -> Result<TunnelConfig> {
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
-            Short('l') | Long("local") => {
-                local = Some(parser.value()?.parse()?);
-            }
-            Short('r') | Long("remote") => {
-                remote = Some(parser.value()?.parse()?);
-            }
-            Short('t') | Long("tunid") => {
-                tunnel_id = Some(parser.value()?.parse()?)
-            }
-            Short('I') | Long("interface") => {
-                tap_name = Some(parser.value()?.parse()?)
-            }
-            Short('k') | Long("keepalive") => {
-                keepalive_interval = Some(parser.value()?.parse()?)
-            }
-            Short('W') | Long("timeout") => {
-                recv_timeout = Some(parser.value()?.parse()?)
-            }
+            Short('l') | Long("local") => local = Some(parser.value()?.parse()?),
+            Short('r') | Long("remote") => remote = Some(parser.value()?.parse()?),
+            Short('t') | Long("tunid") => tunnel_id = Some(parser.value()?.parse()?),
+            Short('I') | Long("interface") => tap_name = Some(parser.value()?.parse()?),
+            Short('k') | Long("keepalive") => keepalive_interval = Some(parser.value()?.parse()?),
+            Short('W') | Long("timeout") => recv_timeout = Some(parser.value()?.parse()?),
             Short('h') | Long("help") => {
                 print!("{}", HELP_MESSAGE);
                 std::process::exit(0);
@@ -58,16 +46,17 @@ fn parse_args() -> Result<TunnelConfig> {
                 println!("eoip-rs {}", VERSION);
                 std::process::exit(0);
             }
-            _ => return Err(arg.unexpected().into())
+            _ => return Err(arg.unexpected().into()),
         }
-    };
+    }
     Ok(TunnelConfig::new(
         local,
-        remote.ok_or(Error::msg("Remote address is required"))?,
-        tunnel_id.ok_or(Error::msg("Tunnel ID is required"))?,
+        remote.ok_or(anyhow!("Remote address is required"))?,
+        tunnel_id.ok_or(anyhow!("Tunnel ID is required"))?,
         tap_name,
         keepalive_interval,
-        recv_timeout))
+        recv_timeout,
+    ))
 }
 
 fn main() -> Result<()> {
